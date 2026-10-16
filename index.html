@@ -4,8 +4,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#14181c">
 <title>HomeEye</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <style>
 :root{--bg:#14181c;--panel:#1d242b;--line:#2c3640;--ink:#e8edf1;--dim:#8d9aa6;--go:#4fd1a5;--alert:#ff6b4a;--r:14px;color-scheme:dark}
 *{box-sizing:border-box;margin:0}
@@ -34,9 +33,9 @@ button.big span{color:var(--dim);font-size:14px}
 .zones i{border:1px dashed #fff4}
 .zones i.off{background:#000a}
 .small{color:var(--dim);font-size:14px}
-textarea{width:100%;height:70px;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:8px;font:12px monospace}
-#qr{background:#fff;padding:10px;border-radius:12px;width:min(100%,300px);margin:8px auto;display:block}
-#qr svg,#qr img{width:100%;height:auto;display:block}
+.err{color:var(--alert);font-size:14px;margin-top:8px}
+label{display:block;margin:10px 0 4px;font-size:14px;color:var(--dim)}
+input[type=text],input[type=password]{width:100%;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:12px;font:inherit}
 .ev{display:flex;gap:10px;align-items:center;padding:8px 0;border-top:1px solid var(--line)}
 .ev img{width:84px;border-radius:8px}
 input[type=range]{width:100%;accent-color:var(--go)}
@@ -46,181 +45,230 @@ a{color:var(--go)}
 
 <section id="home">
   <h1>HomeEye</h1>
-  <p class="sub">Turn a spare phone into a security camera. No account, no login. Devices pair by QR code.</p>
-  <button class="big" id="goCam"><b>Use this phone as the camera</b><span>Leave it plugged in, pointed at what you want to watch.</span></button>
-  <button class="big" id="goView"><b>Use this phone as the viewer</b><span>Watch live, get motion alerts, talk through the camera.</span></button>
-  <p class="small">Both phones need internet. Open this file from an HTTPS address (any free static host) so cameras and microphones are allowed.</p>
-  <p class="small">Version 3</p>
+  <p class="sub">Turn a spare phone into a security camera. No account to sign up for: you invent a username and password on the camera, and type the same on the viewer.</p>
+  <button class="big" id="goCam"><b>Use this phone as the camera</b><span>Create the username and password, then leave it plugged in.</span></button>
+  <button class="big" id="goView"><b>Use this phone as the viewer</b><span>Enter the same username and password to watch.</span></button>
+  <p class="small">Version 5. Open this page over HTTPS so camera and microphone are allowed.</p>
 </section>
 
 <section id="cam" class="hide">
   <h2>Camera</h2>
-  <div class="vid"><video id="camV" autoplay muted playsinline></video><div class="zones" id="zones"></div><span class="badge" id="camB">Starting…</span></div>
-  <div class="row">
-    <button id="armBtn" class="on">Armed</button>
-    <button id="torchBtn">Light</button>
-    <button id="flipBtn">Flip camera</button>
+  <div class="card" id="camSetup">
+    <label for="cu">Create a username</label>
+    <input type="text" id="cu" autocomplete="off" autocapitalize="none" placeholder="e.g. frontdoor">
+    <label for="cp">Create a password (8+ characters)</label>
+    <input type="password" id="cp" autocomplete="new-password" placeholder="Choose something hard to guess">
+    <div class="row">
+      <button id="genPw">Generate strong password</button>
+      <button id="showPw">Show</button>
+    </div>
+    <button class="p" id="startCam" style="width:100%">Start camera</button>
+    <p class="err" id="camErr"></p>
   </div>
-  <div class="card">
-    <label for="sens">Motion sensitivity</label>
-    <input type="range" id="sens" min="1" max="10" value="5">
-    <p class="small">Tap a square on the preview to ignore that area.</p>
+  <div id="camLive" class="hide">
+    <div class="vid"><video id="camV" autoplay muted playsinline></video><div class="zones" id="zones"></div><span class="badge" id="camB">Starting…</span></div>
+    <div class="card"><p class="small">Viewer must enter this username and password:</p><p><b id="credShow"></b></p></div>
+    <div class="row">
+      <button id="armBtn" class="on">Armed</button>
+      <button id="torchBtn">Light</button>
+      <button id="flipBtn">Flip camera</button>
+    </div>
+    <div class="row">
+      <button id="nightBtn">Night vision</button>
+      <button id="camMic" class="on">Mic on</button>
+      <button id="spkBtn" class="on">Speaker on</button>
+    </div>
+    <div class="row">
+      <button id="sirenBtn">Siren</button>
+      <button id="autoBtn">Auto-siren off</button>
+    </div>
+    <p class="small">Siren plays through this phone's speaker. Turn its media volume up.</p>
+    <div class="card">
+      <label for="sens" style="margin-top:0">Motion sensitivity</label>
+      <input type="range" id="sens" min="1" max="10" value="5">
+      <p class="small">Tap a square on the preview to ignore that area.</p>
+    </div>
+    <div class="card"><h2>Saved clips on this phone</h2><div id="clips" class="small">None yet.</div><div class="row"><button id="clearClips">Delete all clips</button></div></div>
   </div>
-  <div class="card" id="pairCam">
-    <h2>Pair a viewer</h2>
-    <p class="small">1. Scan this on the viewer phone (or copy the code).</p>
-    <p class="small" id="pairMsg">Preparing code, wait a few seconds…</p>
-    <div id="qr"></div>
-    <textarea id="offOut" readonly placeholder="Code appears here"></textarea>
-    <div class="row"><button id="copyOffer">Copy code</button></div>
-    <p class="small">2. Scan the viewer's reply code, or paste it here.</p>
-    <textarea id="ansIn" placeholder="Paste viewer reply"></textarea>
-    <div class="row"><button id="scanAns">Scan reply</button><button class="p" id="useAns">Connect</button></div>
-  </div>
-  <div class="card"><h2>Saved clips on this phone</h2><div id="clips" class="small">None yet.</div><div class="row"><button id="clearClips">Delete all clips</button></div></div>
   <button id="camBack">Back</button>
 </section>
 
 <section id="view" class="hide">
   <h2>Viewer</h2>
   <div class="card" id="pairView">
-    <p class="small">1. Scan the code shown on the camera phone, or paste it.</p>
-    <textarea id="offIn" placeholder="Paste camera code"></textarea>
-    <div class="row"><button id="scanOff">Scan camera code</button><button class="p" id="useOff">Continue</button></div>
-    <div id="replyBox" class="hide">
-      <p class="small">2. Show this reply to the camera phone (scan or copy).</p>
-      <div id="qr2"></div>
-      <div class="row"><button id="copyAns">Copy reply</button></div>
-    </div>
+    <label for="vu">Username</label>
+    <input type="text" id="vu" autocomplete="off" autocapitalize="none">
+    <label for="vp">Password</label>
+    <input type="password" id="vp" autocomplete="current-password">
+    <div class="row"><button class="p" id="connect">Connect</button></div>
+    <p class="small" id="vMsg"></p>
+    <p class="err" id="vErr"></p>
   </div>
   <div id="live" class="hide">
-    <div class="vid"><video id="remV" autoplay playsinline></video><span class="badge" id="vB">Connecting…</span></div>
-    <div class="row">
-      <button id="talk">Hold to talk</button>
-      <button id="vTorch">Light</button>
-      <button id="vFlip">Flip</button>
-      <button id="vArm" class="on">Armed</button>
+    <div class="vid" id="vidBox"><video id="remV" autoplay muted playsinline style="object-fit:contain"></video><span class="badge" id="vB">Connecting…</span></div>
+    <div class="card">
+      <h2>Talk and listen</h2>
+      <div class="row"><button id="talk">Hold to talk</button><button id="latch">Talk lock</button><button id="mute">Unmute</button></div>
+      <label for="vol" style="margin-top:0">Camera sound volume</label>
+      <input type="range" id="vol" min="0" max="1" step=".05" value="1">
+      <div class="row"><button id="vCamMic">Camera mic on</button><button id="vSpk">Camera speaker on</button></div>
     </div>
-    <div class="row"><button id="snap">Snapshot</button><button id="rec">Record clip</button><button id="mute">Unmute</button></div>
+    <div class="card">
+      <h2>Camera controls</h2>
+      <div class="row"><button id="vTorch">Light</button><button id="vNight">Night vision</button><button id="vFlip">Flip camera</button></div>
+      <div class="row"><button id="vSiren">Siren</button><button id="vAuto">Auto-siren off</button><button id="vArm" class="on">Armed</button></div>
+    </div>
+    <div class="card">
+      <h2>View</h2>
+      <div class="row"><button id="vRotate">Rotate</button><button id="fs">Full screen</button><button id="snap">Snapshot</button><button id="rec">Record clip</button></div>
+    </div>
     <div class="card"><h2>Motion history</h2><div id="events" class="small">No motion yet.</div></div>
   </div>
   <button id="viewBack">Back</button>
 </section>
-
-<div id="scanner" class="hide" style="position:fixed;inset:0;background:#000;z-index:9;padding:16px">
-  <video id="scanV" playsinline muted style="width:100%;border-radius:14px"></video>
-  <p class="small" style="margin:10px 0">Point at the QR code.</p>
-  <button id="scanX">Cancel</button>
-</div>
-
+<audio id="talkAudio" autoplay></audio>
 </main>
 <script>
 const $=s=>document.querySelector(s), show=id=>{for(const s of ['home','cam','view'])$('#'+s).classList.toggle('hide',s!==id)};
-const cfg={iceServers:[{urls:'stun:stun.l.google.com:19302'}]};
+const rtc={iceServers:[{urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun1.l.google.com:19302'}]};
 
-/* ---------- pairing helpers ---------- */
-async function pack(d){const s=new Blob([JSON.stringify({type:d.type,sdp:d.sdp})]).stream().pipeThrough(new CompressionStream('deflate-raw'));const b=new Uint8Array(await new Response(s).arrayBuffer());let r='';b.forEach(x=>r+=String.fromCharCode(x));return btoa(r)}
-async function unpack(t){const b=Uint8Array.from(atob(t.trim()),c=>c.charCodeAt(0));return JSON.parse(await new Response(new Blob([b]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).text())}
-const gather=pc=>new Promise(r=>{if(pc.iceGatheringState==='complete')return r();pc.addEventListener('icegatheringstatechange',()=>pc.iceGatheringState==='complete'&&r());setTimeout(r,4000)});
-function drawQR(el,text){
-  try{
-    const q=qrcode(0,'L');q.addData(text);q.make();
-    const n=q.getModuleCount(),s=Math.max(3,Math.floor(600/n)),m=2*s,c=document.createElement('canvas');
-    c.width=c.height=n*s+2*m;const x=c.getContext('2d');
-    x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);x.fillStyle='#000';
-    for(let r=0;r<n;r++)for(let k=0;k<n;k++)if(q.isDark(r,k))x.fillRect(m+k*s,m+r*s,s,s);
-    c.style.cssText='width:100%;height:auto;display:block';
-    el.replaceChildren(c);
-  }catch(e){el.innerHTML='<p class="small" style="color:#000">Could not draw QR. Use Copy code instead.</p>'}
+/* username + password -> private room ID (PBKDF2, never sent anywhere) */
+async function roomId(u,p){
+  const enc=new TextEncoder(),key=await crypto.subtle.importKey('raw',enc.encode(p),'PBKDF2',false,['deriveBits']);
+  const bits=await crypto.subtle.deriveBits({name:'PBKDF2',hash:'SHA-256',iterations:150000,salt:enc.encode('homeeye-v4:'+u.trim().toLowerCase())},key,256);
+  return 'he'+[...new Uint8Array(bits)].map(b=>b.toString(16).padStart(2,'0')).join('').slice(0,40);
 }
-async function copy(t){
-  let ok=false;
-  try{await navigator.clipboard.writeText(t);ok=true}catch(e){}
-  if(!ok){const a=document.createElement('textarea');a.value=t;document.body.append(a);a.select();try{ok=document.execCommand('copy')}catch(e){}a.remove()}
-  alert(ok?'Code copied.':'Copy blocked. Long-press the code box and copy it manually.');
-}
-let scanStream,scanOn=false;
-async function scan(cb){
-  $('#scanner').classList.remove('hide');
-  try{scanStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}})}catch(e){stopScan();alert('Camera access is blocked. Paste the code instead.');return}
-  const v=$('#scanV');v.srcObject=scanStream;await v.play();scanOn=true;
-  const c=document.createElement('canvas'),x=c.getContext('2d',{willReadFrequently:true});
-  (function tick(){if(!scanOn)return;if(v.videoWidth){c.width=v.videoWidth;c.height=v.videoHeight;x.drawImage(v,0,0);const r=jsQR(x.getImageData(0,0,c.width,c.height).data,c.width,c.height);if(r&&r.data){stopScan();cb(r.data);return}}requestAnimationFrame(tick)})();
-}
-function stopScan(){scanOn=false;scanStream&&scanStream.getTracks().forEach(t=>t.stop());$('#scanner').classList.add('hide')}
-$('#scanX').onclick=stopScan;
 
-/* ---------- clip storage (camera phone) ---------- */
+/* clips (camera phone) */
 const db=new Promise(r=>{const q=indexedDB.open('homeeye',1);q.onupgradeneeded=()=>q.result.createObjectStore('c',{autoIncrement:true});q.onsuccess=()=>r(q.result)});
 const putClip=async b=>{(await db).transaction('c','readwrite').objectStore('c').add({b,ts:Date.now()})};
 const allClips=async()=>{const d=await db;return new Promise(r=>{const q=d.transaction('c').objectStore('c').getAll();q.onsuccess=()=>r(q.result)})};
 async function listClips(){
-  const a=(await allClips()).reverse(),el=$('#clips');
-  el.innerHTML=a.length?'':'None yet.';
+  const a=(await allClips()).reverse(),el=$('#clips');el.innerHTML=a.length?'':'None yet.';
   a.slice(0,20).forEach(c=>{const l=document.createElement('a');l.href=URL.createObjectURL(c.b);l.download='clip-'+c.ts+'.webm';l.textContent=new Date(c.ts).toLocaleString();l.style.display='block';el.append(l)});
 }
 $('#clearClips').onclick=async()=>{(await db).transaction('c','readwrite').objectStore('c').clear();listClips()};
 
-/* ---------- CAMERA ---------- */
-let cStream,cPc,cDc,facing='environment',armed=true,sens=5,zoneOn=Array(9).fill(true),prev=null,lastAlert=0,recorder,wake;
-$('#goCam').onclick=()=>{show('cam');startCam()};
-$('#camBack').onclick=()=>{stopCam();show('home')};
+/* ================= CAMERA ================= */
+let cStream,peer,conn,curCall,facing='environment',armed=true,sens=5,zoneOn=Array(9).fill(true),prev=null,lastAlert=0,recorder,wake,tOn=false,motionTimer;
+$('#goCam').onclick=()=>show('cam');
+$('#camBack').onclick=()=>location.reload();
+$('#showPw').onclick=()=>{const i=$('#cp');i.type=i.type==='password'?'text':'password';$('#showPw').textContent=i.type==='password'?'Show':'Hide'};
+$('#genPw').onclick=()=>{const c='abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789',a=crypto.getRandomValues(new Uint8Array(14));$('#cp').value=[...a].map(x=>c[x%c.length]).join('');$('#cp').type='text';$('#showPw').textContent='Hide'};
 const zEl=$('#zones');for(let i=0;i<9;i++){const d=document.createElement('i');d.onclick=()=>{zoneOn[i]=!zoneOn[i];d.classList.toggle('off',!zoneOn[i])};zEl.append(d)}
 $('#sens').oninput=e=>sens=+e.target.value;
 $('#armBtn').onclick=()=>setArm(!armed);
-function setArm(v){armed=v;for(const id of['#armBtn','#vArm']){$(id).textContent=v?'Armed':'Disarmed';$(id).classList.toggle('on',v)}$('#camB').textContent=v?'Watching':'Paused';cDc&&cDc.readyState==='open'&&cDc.send(JSON.stringify({t:'state',armed:v}))}
-async function getStream(){
-  return navigator.mediaDevices.getUserMedia({video:{facingMode:facing,width:{ideal:1280},height:{ideal:720},frameRate:{ideal:20}},audio:{echoCancellation:true,noiseSuppression:true}});
-}
-async function startCam(){
-  try{cStream=await getStream()}catch(e){$('#camB').textContent='Camera blocked';alert('Allow camera and microphone, and open this page over HTTPS.');return}
-  $('#camV').srcObject=cStream;$('#camB').textContent='Watching';
+const status=t=>$('#camB').textContent=t;
+function setArm(v){armed=v;for(const id of['#armBtn','#vArm']){$(id).textContent=v?'Armed':'Disarmed';$(id).classList.toggle('on',v)}
+  status(conn&&conn.open?(v?'Viewer connected':'Paused'):(v?'Waiting for viewer':'Paused'));
+  pushState()}
+const getStream=()=>navigator.mediaDevices.getUserMedia({video:{facingMode:facing,width:{ideal:1280},height:{ideal:720},frameRate:{ideal:20}},audio:{echoCancellation:true,noiseSuppression:true}});
+
+$('#startCam').onclick=async()=>{
+  try{actx=new (window.AudioContext||window.webkitAudioContext)();actx.resume()}catch(e){}
+  const u=$('#cu').value.trim(),p=$('#cp').value,err=$('#camErr');err.textContent='';
+  if(u.length<3){err.textContent='Username needs at least 3 characters.';return}
+  if(p.length<8){err.textContent='Password needs at least 8 characters.';return}
+  try{cStream=await getStream()}catch(e){err.textContent='Camera or microphone blocked. Allow access and make sure the page is on HTTPS.';return}
+  $('#startCam').disabled=true;$('#startCam').textContent='Starting…';
+  let id;try{id=await roomId(u,p)}catch(e){err.textContent='This browser cannot secure the password (HTTPS required).';$('#startCam').disabled=false;return}
+  $('#camSetup').classList.add('hide');$('#camLive').classList.remove('hide');$('#camV').srcObject=cStream;
+  $('#credShow').textContent='Username: '+u+'   Password: '+p;
+  status('Registering…');
   try{wake=await navigator.wakeLock.request('screen')}catch(e){}
-  Notification&&Notification.permission==='default'&&Notification.requestPermission();
-  listClips();motionLoop();newOffer();
+  try{Notification.permission==='default'&&Notification.requestPermission()}catch(e){}
+  listClips();motionLoop();openPeer(id);
+};
+function openPeer(id){
+  peer=new Peer(id,{config:rtc});
+  peer.on('open',()=>setArm(armed));
+  peer.on('disconnected',()=>{status('Reconnecting…');setTimeout(()=>peer.destroyed||peer.reconnect(),2000)});
+  peer.on('error',e=>{
+    if(e.type==='unavailable-id'){status('Name in use');$('#credShow').textContent='That username and password is already active on another camera, or was used a moment ago. Wait 1 minute and reload, or choose a different username.'}
+    else status('Error: '+e.type)});
+  peer.on('connection',c=>{
+    if(conn&&conn.open)conn.close();conn=c;
+    c.on('open',()=>setArm(armed));
+    c.on('data',onCtl);
+    c.on('close',()=>{status(armed?'Waiting for viewer':'Paused')});
+  });
+  peer.on('call',call=>{
+    if(curCall)curCall.close();curCall=call;call.answer(cStream);
+    call.on('stream',s=>{const a=$('#talkAudio');a.srcObject=s;a.play().catch(()=>{})});
+    call.on('close',()=>status(armed?'Waiting for viewer':'Paused'));
+  });
 }
-function stopCam(){cStream&&cStream.getTracks().forEach(t=>t.stop());cStream=null;cPc&&cPc.close();wake&&wake.release().catch(()=>{})}
-async function newOffer(){
-  cPc&&cPc.close();cPc=new RTCPeerConnection(cfg);
-  cStream.getTracks().forEach(t=>cPc.addTrack(t,cStream));
-  cDc=cPc.createDataChannel('ctl');
-  cDc.onopen=()=>{$('#camB').textContent=armed?'Viewer connected':'Paused';$('#pairCam').classList.add('hide');setArm(armed)};
-  cDc.onmessage=async e=>{const m=JSON.parse(e.data);
-    if(m.t==='arm')setArm(m.v);
-    if(m.t==='torch')torch(m.v);
-    if(m.t==='flip')flip();
-    if(m.t==='snap')cDc.send(JSON.stringify({t:'snap',img:shot(),ts:Date.now()}))};
-  cPc.onconnectionstatechange=()=>{if(['disconnected','failed','closed'].includes(cPc.connectionState)){$('#pairCam').classList.remove('hide');$('#camB').textContent='Viewer left';newOffer()}};
-  try{
-    $('#pairMsg').textContent='Preparing code, wait a few seconds…';
-    await cPc.setLocalDescription(await cPc.createOffer());await gather(cPc);
-    const code=await pack(cPc.localDescription);$('#ansIn').value='';
-    $('#offOut').value=code;$('#pairMsg').textContent='1. Scan this on the viewer phone, or copy the code.';
-    if(typeof qrcode==='undefined')$('#qr').textContent='QR library did not load. Use the code below.';else drawQR($('#qr'),code);
-    $('#copyOffer').onclick=()=>copy(code);
-  }catch(e){$('#pairMsg').textContent='Error: '+(e&&e.message||e)+'. Reload the page and try again.'}
+async function onCtl(m){
+  if(m.t==='arm')setArm(m.v);
+  if(m.t==='torch')torch(m.v);
+  if(m.t==='flip')flip();
+  if(m.t==='night')setNight(m.v);
+  if(m.t==='mic')setMic(m.v);
+  if(m.t==='spk')setSpk(m.v);
+  if(m.t==='siren')m.v?startSiren():stopSiren();
+  if(m.t==='auto'){autoSiren=m.v;pushState()}
+  if(m.t==='snap'&&conn&&conn.open)conn.send({t:'snap',img:shot(),ts:Date.now()});
 }
-async function applyAnswer(t){try{await cPc.setRemoteDescription(await unpack(t))}catch(e){alert('That reply code is not valid. Try again.')}}
-$('#useAns').onclick=()=>applyAnswer($('#ansIn').value);
-$('#scanAns').onclick=()=>scan(applyAnswer);
-async function torch(v){try{await cStream.getVideoTracks()[0].applyConstraints({advanced:[{torch:v}]});$('#torchBtn').classList.toggle('on',v)}catch(e){}}
-let tOn=false;$('#torchBtn').onclick=()=>torch(tOn=!tOn);
+async function torch(v){try{await cStream.getVideoTracks()[0].applyConstraints({advanced:[{torch:v}]});tOn=v}catch(e){tOn=false}$('#torchBtn').classList.toggle('on',tOn);pushState()}
+$('#torchBtn').onclick=()=>torch(!tOn);
 async function flip(){
   facing=facing==='environment'?'user':'environment';
-  const old=cStream;let n;try{n=await getStream()}catch(e){return}
-  const vt=n.getVideoTracks()[0],s=cPc&&cPc.getSenders().find(x=>x.track&&x.track.kind==='video');
-  s&&await s.replaceTrack(vt);old.getVideoTracks().forEach(t=>t.stop());
-  old.removeTrack(old.getVideoTracks()[0]);old.addTrack(vt);prev=null;$('#camV').srcObject=old;
+  let n;try{n=await getStream()}catch(e){return}
+  const vt=n.getVideoTracks()[0],pc=curCall&&curCall.peerConnection,s=pc&&pc.getSenders().find(x=>x.track&&x.track.kind==='video');
+  s&&await s.replaceTrack(vt);
+  const old=cStream.getVideoTracks()[0];cStream.removeTrack(old);old.stop();cStream.addTrack(vt);
+  n.getAudioTracks().forEach(t=>t.stop());prev=null;$('#camV').srcObject=cStream;
+  tOn=false;$('#torchBtn').classList.remove('on');if(night)setNight(true);else pushState();
 }
 $('#flipBtn').onclick=flip;
+
+/* night vision, mic, speaker, siren */
+const NIGHT='grayscale(1) brightness(2.2) contrast(1.35)';
+let night=false,micOn=true,spkOn=true,sirenOn=false,autoSiren=false,actx,sirenNodes,sirenTO;
+function torchOk(){try{return !!cStream.getVideoTracks()[0].getCapabilities().torch}catch(e){return false}}
+function pushState(){
+  const t=(id,on,txt)=>{const b=$(id);b.classList.toggle('on',!!on);b.textContent=txt};
+  t('#nightBtn',night,night?'Night on':'Night vision');
+  t('#camMic',micOn,micOn?'Mic on':'Mic off');
+  t('#spkBtn',spkOn,spkOn?'Speaker on':'Speaker off');
+  t('#sirenBtn',sirenOn,sirenOn?'Stop siren':'Siren');
+  t('#autoBtn',autoSiren,autoSiren?'Auto-siren on':'Auto-siren off');
+  conn&&conn.open&&conn.send({t:'state',armed,night,mic:micOn,spk:spkOn,siren:sirenOn,auto:autoSiren,torch:tOn,torchOk:torchOk()});
+}
+async function setNight(v){
+  night=v;$('#camV').style.filter=v?NIGHT:'';
+  try{const t=cStream.getVideoTracks()[0],c=t.getCapabilities();
+    if(c.exposureCompensation)await t.applyConstraints({advanced:[{exposureCompensation:v?c.exposureCompensation.max:0}]})}catch(e){}
+  pushState();
+}
+function setMic(v){micOn=v;cStream.getAudioTracks().forEach(t=>t.enabled=v);pushState()}
+function setSpk(v){spkOn=v;$('#talkAudio').muted=!v;pushState()}
+function startSiren(){
+  if(sirenOn)return;
+  try{if(!actx)actx=new (window.AudioContext||window.webkitAudioContext)();actx.resume();
+    const o=actx.createOscillator(),l=actx.createOscillator(),lg=actx.createGain(),g=actx.createGain();
+    o.type='square';o.frequency.value=1000;l.frequency.value=1.5;lg.gain.value=450;g.gain.value=1;
+    l.connect(lg);lg.connect(o.frequency);o.connect(g);g.connect(actx.destination);o.start();l.start();
+    sirenNodes=[o,l,g];sirenOn=true;clearTimeout(sirenTO);sirenTO=setTimeout(stopSiren,60000)}catch(e){}
+  pushState();
+}
+function stopSiren(){
+  (sirenNodes||[]).forEach(n=>{try{n.stop?n.stop():n.disconnect()}catch(e){}});
+  sirenNodes=null;sirenOn=false;clearTimeout(sirenTO);pushState();
+}
+$('#nightBtn').onclick=()=>setNight(!night);
+$('#camMic').onclick=()=>setMic(!micOn);
+$('#spkBtn').onclick=()=>setSpk(!spkOn);
+$('#sirenBtn').onclick=()=>sirenOn?stopSiren():startSiren();
+$('#autoBtn').onclick=()=>{autoSiren=!autoSiren;pushState()};
 function shot(){const v=$('#camV'),c=document.createElement('canvas');c.width=240;c.height=Math.round(240*(v.videoHeight||3)/(v.videoWidth||4));c.getContext('2d').drawImage(v,0,0,c.width,c.height);return c.toDataURL('image/jpeg',.5)}
 
 /* motion detection: 64x48 gray frame difference, 3x3 zones */
 const mc=document.createElement('canvas');mc.width=64;mc.height=48;const mx=mc.getContext('2d',{willReadFrequently:true});
 function motionLoop(){
-  setInterval(()=>{
+  motionTimer=setInterval(()=>{
     const v=$('#camV');if(!cStream||!v.videoWidth)return;
-    mx.drawImage(v,0,0,64,48);const d=mx.getImageData(0,0,64,48).data,g=new Uint8Array(64*48);
+    mx.filter=night?'brightness(2.5) contrast(1.3)':'none';mx.drawImage(v,0,0,64,48);const d=mx.getImageData(0,0,64,48).data,g=new Uint8Array(64*48);
     for(let i=0;i<g.length;i++)g[i]=(d[i*4]*.3+d[i*4+1]*.59+d[i*4+2]*.11)|0;
     if(prev&&armed){let ch=0,tot=0;
       for(let y=0;y<48;y++)for(let x=0;x<64;x++){if(!zoneOn[Math.floor(y/16)*3+Math.floor(x/21.4)])continue;tot++;if(Math.abs(g[y*64+x]-prev[y*64+x])>28)ch++}
@@ -232,50 +280,94 @@ function motionLoop(){
 function onMotion(){
   const now=Date.now();$('#camB').classList.add('m');setTimeout(()=>$('#camB').classList.remove('m'),1500);
   if(now-lastAlert<15000)return;lastAlert=now;
-  cDc&&cDc.readyState==='open'&&cDc.send(JSON.stringify({t:'motion',img:shot(),ts:now}));
+  if(autoSiren)startSiren();
+  conn&&conn.open&&conn.send({t:'motion',img:shot(),ts:now});
   if(!recorder||recorder.state==='inactive'){
     try{const ch=[];recorder=new MediaRecorder(cStream);recorder.ondataavailable=e=>e.data.size&&ch.push(e.data);
       recorder.onstop=async()=>{await putClip(new Blob(ch,{type:'video/webm'}));listClips()};recorder.start();setTimeout(()=>recorder.state==='recording'&&recorder.stop(),12000)}catch(e){}
   }
 }
 
-/* ---------- VIEWER ---------- */
-let vPc,vDc,mic,micTrack,vRec;
-$('#goView').onclick=()=>show('view');
-$('#viewBack').onclick=()=>{vPc&&vPc.close();location.reload()};
-async function handleOffer(t){
-  let off;try{off=await unpack(t)}catch(e){alert('That camera code is not valid. Try again.');return}
-  vPc=new RTCPeerConnection(cfg);
-  try{mic=await navigator.mediaDevices.getUserMedia({audio:true});micTrack=mic.getAudioTracks()[0];micTrack.enabled=false}catch(e){}
-  vPc.ontrack=e=>{const v=$('#remV');if(v.srcObject!==e.streams[0])v.srcObject=e.streams[0];v.muted=true};
-  vPc.ondatachannel=e=>{vDc=e.channel;vDc.onopen=()=>{$('#pairView').classList.add('hide');$('#live').classList.remove('hide');$('#vB').textContent='Live'};vDc.onmessage=onCamMsg};
-  vPc.onconnectionstatechange=()=>{if(['disconnected','failed','closed'].includes(vPc.connectionState))$('#vB').textContent='Disconnected'};
-  await vPc.setRemoteDescription(off);
-  if(micTrack){const tr=vPc.getTransceivers().find(x=>x.receiver.track.kind==='audio');if(tr){tr.direction='sendrecv';await tr.sender.replaceTrack(micTrack)}}
-  await vPc.setLocalDescription(await vPc.createAnswer());await gather(vPc);
-  const code=await pack(vPc.localDescription);$('#replyBox').classList.remove('hide');drawQR($('#qr2'),code);$('#copyAns').onclick=()=>copy(code);
+/* ================= VIEWER ================= */
+let vPeer,vConn,vCall,micTrack,vRec,live=false,vTimer;
+$('#goView').onclick=()=>{show('view');$('#vu').value=localStorage.getItem('he-user')||'';try{Notification.permission==='default'&&Notification.requestPermission()}catch(e){}};
+$('#viewBack').onclick=()=>location.reload();
+const vErr=t=>{$('#vErr').textContent=t;$('#vMsg').textContent=''};
+$('#connect').onclick=async()=>{
+  const u=$('#vu').value.trim(),p=$('#vp').value;vErr('');
+  if(!u||!p){vErr('Enter the username and password from the camera phone.');return}
+  localStorage.setItem('he-user',u);
+  $('#connect').disabled=true;$('#vMsg').textContent='Looking for the camera…';
+  let id;try{id=await roomId(u,p)}catch(e){vErr('This browser cannot secure the password (HTTPS required).');$('#connect').disabled=false;return}
+  live=false;vPeer&&vPeer.destroy();vPeer=new Peer({config:rtc});
+  vPeer.on('error',e=>{
+    $('#connect').disabled=false;
+    if(e.type==='peer-unavailable')vErr('No camera found for that username and password. Check both and make sure the camera is running.');
+    else vErr('Connection problem: '+e.type);
+  });
+  vPeer.on('open',()=>{
+    vConn=vPeer.connect(id,{reliable:true});
+    vConn.on('open',()=>startCall(id));
+    vConn.on('data',onCamMsg);
+    vConn.on('close',()=>{if(live){$('#vB').textContent='Disconnected. Tap Back and reconnect.'}});
+    clearTimeout(vTimer);vTimer=setTimeout(()=>{if(!live){vErr('Camera found but video did not start. Try again, or check both phones have internet.');$('#connect').disabled=false}},20000);
+  });
+};
+async function startCall(id){
+  let stream;
+  try{const m=await navigator.mediaDevices.getUserMedia({audio:true});micTrack=m.getAudioTracks()[0];micTrack.enabled=false;stream=m}
+  catch(e){const ac=new AudioContext(),d=ac.createMediaStreamDestination();stream=d.stream;micTrack=null}
+  vCall=vPeer.call(id,stream);
+  vCall.on('stream',rs=>{
+    const v=$('#remV');if(v.srcObject!==rs)v.srcObject=rs;
+    if(!live){live=true;$('#pairView').classList.add('hide');$('#live').classList.remove('hide');$('#vB').textContent='Live';applyRot()}
+  });
+  vCall.on('close',()=>{$('#vB').textContent='Disconnected'});
 }
-$('#useOff').onclick=()=>handleOffer($('#offIn').value);
-$('#scanOff').onclick=()=>scan(handleOffer);
-const send=o=>vDc&&vDc.readyState==='open'&&vDc.send(JSON.stringify(o));
+const send=o=>vConn&&vConn.open&&vConn.send(o);
 let events=JSON.parse(localStorage.getItem('he-ev')||'[]');renderEvents();
 function renderEvents(){const el=$('#events');if(!events.length)return;el.innerHTML='';events.forEach(e=>{const d=document.createElement('div');d.className='ev';d.innerHTML='<img alt="Motion snapshot" src="'+e.img+'"><div>'+(e.snap?'Snapshot':'Motion')+'<br><span class="small">'+new Date(e.ts).toLocaleString()+'</span></div>';el.append(d)})}
 function addEvent(e){events.unshift(e);events=events.slice(0,15);try{localStorage.setItem('he-ev',JSON.stringify(events))}catch(x){events=events.slice(0,5)}renderEvents()}
 function beep(){try{const a=new AudioContext(),o=a.createOscillator();o.frequency.value=880;o.connect(a.destination);o.start();setTimeout(()=>{o.stop();a.close()},400)}catch(e){}}
-function onCamMsg(e){const m=JSON.parse(e.data);
+function onCamMsg(m){
   if(m.t==='motion'){addEvent(m);beep();$('#vB').textContent='Motion!';$('#vB').classList.add('m');setTimeout(()=>{$('#vB').textContent='Live';$('#vB').classList.remove('m')},3000);
     try{Notification.permission==='granted'&&new Notification('HomeEye: motion detected',{icon:m.img})}catch(x){}}
   if(m.t==='snap')addEvent({...m,snap:1});
-  if(m.t==='state'){$('#vArm').textContent=m.armed?'Armed':'Disarmed';$('#vArm').classList.toggle('on',m.armed)}}
-Notification&&Notification.permission==='default'&&$('#goView').addEventListener('click',()=>Notification.requestPermission());
-let vA=true;$('#vArm').onclick=()=>send({t:'arm',v:vA=!vA});
-let vT=false;$('#vTorch').onclick=()=>{send({t:'torch',v:vT=!vT});$('#vTorch').classList.toggle('on',vT)};
+  if(m.t==='state')applyState(m);
+}
+let S={armed:true},rot=+(localStorage.getItem('he-rot')||0),latch=false;
+const tog=(id,on,txt)=>{const b=$(id);b.classList.toggle('on',!!on);if(txt)b.textContent=txt};
+function applyState(m){
+  S=m;
+  tog('#vArm',m.armed,m.armed?'Armed':'Disarmed');
+  tog('#vTorch',m.torch,m.torchOk?'Light':'Light n/a');
+  tog('#vNight',m.night,m.night?'Night on':'Night vision');
+  tog('#vCamMic',m.mic,m.mic?'Camera mic on':'Camera mic off');
+  tog('#vSpk',m.spk,m.spk?'Camera speaker on':'Camera speaker off');
+  tog('#vSiren',false,m.siren?'Stop siren':'Siren');
+  $('#vSiren').style.borderColor=m.siren?'var(--alert)':'';$('#vSiren').style.color=m.siren?'var(--alert)':'';
+  tog('#vAuto',m.auto,m.auto?'Auto-siren on':'Auto-siren off');
+  $('#remV').style.filter=m.night?NIGHT:'';
+}
+$('#vArm').onclick=()=>send({t:'arm',v:!S.armed});
+$('#vTorch').onclick=()=>send({t:'torch',v:!S.torch});
+$('#vNight').onclick=()=>send({t:'night',v:!S.night});
+$('#vCamMic').onclick=()=>send({t:'mic',v:!S.mic});
+$('#vSpk').onclick=()=>send({t:'spk',v:!S.spk});
+$('#vSiren').onclick=()=>send({t:'siren',v:!S.siren});
+$('#vAuto').onclick=()=>send({t:'auto',v:!S.auto});
 $('#vFlip').onclick=()=>send({t:'flip'});
 $('#snap').onclick=()=>send({t:'snap'});
 $('#mute').onclick=()=>{const v=$('#remV');v.muted=!v.muted;$('#mute').textContent=v.muted?'Unmute':'Mute'};
-const talk=on=>{if(micTrack){micTrack.enabled=on;$('#talk').classList.toggle('on',on);$('#talk').textContent=on?'Talking…':'Hold to talk'}};
-['pointerdown'].forEach(k=>$('#talk').addEventListener(k,e=>{e.preventDefault();talk(true)}));
-['pointerup','pointerleave','pointercancel'].forEach(k=>$('#talk').addEventListener(k,()=>talk(false)));
+$('#vol').oninput=e=>{$('#remV').volume=+e.target.value};
+function applyRot(){const v=$('#remV'),b=$('#vidBox'),w=b.clientWidth,h=b.clientHeight||1,s=rot%180?Math.min(w/h,h/w):1;v.style.transform='rotate('+rot+'deg) scale('+s+')'}
+$('#vRotate').onclick=()=>{rot=(rot+90)%360;localStorage.setItem('he-rot',rot);applyRot()};
+$('#fs').onclick=()=>{const b=$('#vidBox'),f=b.requestFullscreen||b.webkitRequestFullscreen;if(f)f.call(b);else{const v=$('#remV');v.webkitEnterFullscreen&&v.webkitEnterFullscreen()}};
+['resize','fullscreenchange'].forEach(k=>window.addEventListener(k,applyRot));
+const talk=on=>{if(!micTrack){$('#talk').textContent='No mic access';return}micTrack.enabled=on;tog('#talk',on,on?'Talking…':'Hold to talk')};
+$('#talk').addEventListener('pointerdown',e=>{e.preventDefault();talk(true)});
+['pointerup','pointerleave','pointercancel'].forEach(k=>$('#talk').addEventListener(k,()=>{if(!latch)talk(false)}));
+$('#latch').onclick=()=>{latch=!latch;talk(latch);tog('#latch',latch,latch?'Talk lock on':'Talk lock')};
 $('#rec').onclick=()=>{
   if(vRec&&vRec.state==='recording'){vRec.stop();return}
   const s=$('#remV').srcObject;if(!s)return;const ch=[];vRec=new MediaRecorder(s);
