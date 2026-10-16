@@ -50,6 +50,7 @@ a{color:var(--go)}
   <button class="big" id="goCam"><b>Use this phone as the camera</b><span>Leave it plugged in, pointed at what you want to watch.</span></button>
   <button class="big" id="goView"><b>Use this phone as the viewer</b><span>Watch live, get motion alerts, talk through the camera.</span></button>
   <p class="small">Both phones need internet. Open this file from an HTTPS address (any free static host) so cameras and microphones are allowed.</p>
+  <p class="small">Version 3</p>
 </section>
 
 <section id="cam" class="hide">
@@ -68,7 +69,9 @@ a{color:var(--go)}
   <div class="card" id="pairCam">
     <h2>Pair a viewer</h2>
     <p class="small">1. Scan this on the viewer phone (or copy the code).</p>
+    <p class="small" id="pairMsg">Preparing code, wait a few seconds…</p>
     <div id="qr"></div>
+    <textarea id="offOut" readonly placeholder="Code appears here"></textarea>
     <div class="row"><button id="copyOffer">Copy code</button></div>
     <p class="small">2. Scan the viewer's reply code, or paste it here.</p>
     <textarea id="ansIn" placeholder="Paste viewer reply"></textarea>
@@ -119,8 +122,23 @@ const cfg={iceServers:[{urls:'stun:stun.l.google.com:19302'}]};
 async function pack(d){const s=new Blob([JSON.stringify({type:d.type,sdp:d.sdp})]).stream().pipeThrough(new CompressionStream('deflate-raw'));const b=new Uint8Array(await new Response(s).arrayBuffer());let r='';b.forEach(x=>r+=String.fromCharCode(x));return btoa(r)}
 async function unpack(t){const b=Uint8Array.from(atob(t.trim()),c=>c.charCodeAt(0));return JSON.parse(await new Response(new Blob([b]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).text())}
 const gather=pc=>new Promise(r=>{if(pc.iceGatheringState==='complete')return r();pc.addEventListener('icegatheringstatechange',()=>pc.iceGatheringState==='complete'&&r());setTimeout(r,4000)});
-function drawQR(el,text){try{const q=qrcode(0,'L');q.addData(text);q.make();el.innerHTML=q.createSvgTag({cellSize:4,margin:0,scalable:true})}catch(e){el.innerHTML='<p class="small" style="color:#000">Code too long for QR. Use Copy.</p>'}}
-const copy=t=>navigator.clipboard.writeText(t).catch(()=>{});
+function drawQR(el,text){
+  try{
+    const q=qrcode(0,'L');q.addData(text);q.make();
+    const n=q.getModuleCount(),s=Math.max(3,Math.floor(600/n)),m=2*s,c=document.createElement('canvas');
+    c.width=c.height=n*s+2*m;const x=c.getContext('2d');
+    x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);x.fillStyle='#000';
+    for(let r=0;r<n;r++)for(let k=0;k<n;k++)if(q.isDark(r,k))x.fillRect(m+k*s,m+r*s,s,s);
+    c.style.cssText='width:100%;height:auto;display:block';
+    el.replaceChildren(c);
+  }catch(e){el.innerHTML='<p class="small" style="color:#000">Could not draw QR. Use Copy code instead.</p>'}
+}
+async function copy(t){
+  let ok=false;
+  try{await navigator.clipboard.writeText(t);ok=true}catch(e){}
+  if(!ok){const a=document.createElement('textarea');a.value=t;document.body.append(a);a.select();try{ok=document.execCommand('copy')}catch(e){}a.remove()}
+  alert(ok?'Code copied.':'Copy blocked. Long-press the code box and copy it manually.');
+}
 let scanStream,scanOn=false;
 async function scan(cb){
   $('#scanner').classList.remove('hide');
@@ -173,8 +191,14 @@ async function newOffer(){
     if(m.t==='flip')flip();
     if(m.t==='snap')cDc.send(JSON.stringify({t:'snap',img:shot(),ts:Date.now()}))};
   cPc.onconnectionstatechange=()=>{if(['disconnected','failed','closed'].includes(cPc.connectionState)){$('#pairCam').classList.remove('hide');$('#camB').textContent='Viewer left';newOffer()}};
-  await cPc.setLocalDescription(await cPc.createOffer());await gather(cPc);
-  const code=await pack(cPc.localDescription);$('#ansIn').value='';drawQR($('#qr'),code);$('#copyOffer').onclick=()=>copy(code);
+  try{
+    $('#pairMsg').textContent='Preparing code, wait a few seconds…';
+    await cPc.setLocalDescription(await cPc.createOffer());await gather(cPc);
+    const code=await pack(cPc.localDescription);$('#ansIn').value='';
+    $('#offOut').value=code;$('#pairMsg').textContent='1. Scan this on the viewer phone, or copy the code.';
+    if(typeof qrcode==='undefined')$('#qr').textContent='QR library did not load. Use the code below.';else drawQR($('#qr'),code);
+    $('#copyOffer').onclick=()=>copy(code);
+  }catch(e){$('#pairMsg').textContent='Error: '+(e&&e.message||e)+'. Reload the page and try again.'}
 }
 async function applyAnswer(t){try{await cPc.setRemoteDescription(await unpack(t))}catch(e){alert('That reply code is not valid. Try again.')}}
 $('#useAns').onclick=()=>applyAnswer($('#ansIn').value);
