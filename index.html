@@ -34,6 +34,7 @@ a{color:var(--go)}
 /* full-screen camera / viewer */
 .full{position:fixed;inset:0;background:#000;z-index:5;overflow:hidden}
 .full video{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:100%;height:100%;object-fit:cover;background:#000}
+#camV{object-fit:contain}
 .badge{position:absolute;top:calc(10px + env(safe-area-inset-top));left:10px;background:#000a;padding:4px 12px;border-radius:99px;font-size:13px;z-index:3}
 .badge.m{background:var(--alert);color:#fff}
 .zones{position:absolute;inset:0;display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(3,1fr);z-index:1}
@@ -64,7 +65,7 @@ a{color:var(--go)}
   <p class="sub">Turn a spare phone into a security camera. No account to sign up for: you invent a username and password on the camera, and type the same on the viewer.</p>
   <button class="big" id="goCam"><b>Use this phone as the camera</b><span>Create the username and password, then leave it plugged in.</span></button>
   <button class="big" id="goView"><b>Use this phone as the viewer</b><span>Enter the same username and password to watch.</span></button>
-  <p class="small">Version 6. Open this page over HTTPS so camera and microphone are allowed.</p>
+  <p class="small">Version 7. Open this page over HTTPS so camera and microphone are allowed.</p>
 </section>
 
 <section id="cam" class="hide">
@@ -164,7 +165,7 @@ async function listClips(){
 $('#clearClips').onclick=async()=>{(await db).transaction('c','readwrite').objectStore('c').clear();listClips()};
 
 /* ================= CAMERA ================= */
-let cStream,peer,conn,curCall,facing='environment',armed=true,sens=5,zoneOn=Array(9).fill(true),prev=null,lastAlert=0,recorder,wake,tOn=false;
+let cStream,peer,conn,curCall,facing='environment',armed=true,sens=5,zoneOn=Array(9).fill(true),prev=null,lastAlert=0,recorder,wake,tOn=false,manualTorch=false,flashTO,ignoreUntil=0;
 let saver=false,night=false,micOn=true,spkOn=true,sirenOn=false,autoSiren=false,actx,sirenNodes,sirenTO;
 $('#goCam').onclick=()=>show('cam');
 $('#camBack').onclick=()=>show('home');
@@ -175,15 +176,16 @@ $('#genPw').onclick=()=>{const c='abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXY
 const zEl=$('#zones');for(let i=0;i<9;i++){const d=document.createElement('i');d.onclick=()=>{zoneOn[i]=!zoneOn[i];d.classList.toggle('off',!zoneOn[i])};zEl.append(d)}
 $('#sens').oninput=e=>sens=+e.target.value;
 const status=t=>$('#camB').textContent=t;
-const VID_HI={width:{ideal:1280},height:{ideal:720},frameRate:{ideal:20}},VID_LO={width:{ideal:640},height:{ideal:480},frameRate:{ideal:10}};
+const VID_HI={width:{ideal:1920},height:{ideal:1080},frameRate:{ideal:24}},VID_LO={width:{ideal:640},height:{ideal:480},frameRate:{ideal:10}};
 const getStream=()=>navigator.mediaDevices.getUserMedia({video:{facingMode:facing,...(saver?VID_LO:VID_HI)},audio:{echoCancellation:true,noiseSuppression:true}});
 
 function torchOk(){try{return !!cStream.getVideoTracks()[0].getCapabilities().torch}catch(e){return false}}
 function pushState(){
+  bt('flipBtn',false,facing==='environment'?'Use front':'Use back');
   bt('armBtn',armed,armed?'Armed':'Paused');bt('torchBtn',tOn,'Light');bt('nightBtn',night,'Night');
   bt('camMic',micOn,micOn?'Mic on':'Mic off');bt('spkBtn',spkOn,spkOn?'Spk on':'Spk off');
   bt('sirenBtn',sirenOn,sirenOn?'Stop':'Siren',sirenOn);bt('autoBtn',autoSiren,'Autosiren');bt('saverBtn',saver,'Saver');
-  conn&&conn.open&&conn.send({t:'state',armed,night,mic:micOn,spk:spkOn,siren:sirenOn,auto:autoSiren,torch:tOn,torchOk:torchOk(),saver});
+  conn&&conn.open&&conn.send({t:'state',armed,night,mic:micOn,spk:spkOn,siren:sirenOn,auto:autoSiren,torch:tOn,torchOk:torchOk(),saver,facing});
 }
 function setArm(v){armed=v;status(conn&&conn.open?(v?'Viewer connected':'Paused'):(v?'Waiting for viewer':'Paused'));pushState()}
 $('#armBtn').onclick=()=>setArm(!armed);
@@ -218,7 +220,9 @@ function openPeer(id){
   });
   peer.on('call',call=>{
     if(curCall)curCall.close();curCall=call;call.answer(cStream);
-    call.on('stream',s=>{const a=$('#talkAudio');a.srcObject=s;a.play().catch(()=>{})});
+    call.on('stream',s=>{const a=$('#talkAudio');a.srcObject=s;a.play().catch(()=>{});
+      try{const sd=call.peerConnection.getSenders().find(x=>x.track&&x.track.kind==='video');
+        if(sd){const p=sd.getParameters();p.encodings=p.encodings&&p.encodings.length?p.encodings:[{}];p.encodings[0].maxBitrate=4e6;p.degradationPreference='maintain-resolution';sd.setParameters(p).catch(()=>{})}}catch(e){}});
     call.on('close',()=>status(armed?'Waiting for viewer':'Paused'));
   });
 }
@@ -234,15 +238,40 @@ async function onCtl(m){
   if(m.t==='saver')setSaver(m.v);
   if(m.t==='snap'&&conn&&conn.open)conn.send({t:'snap',img:shot(),ts:Date.now()});
 }
-async function torch(v){try{await cStream.getVideoTracks()[0].applyConstraints({advanced:[{torch:v}]});tOn=v}catch(e){tOn=false}pushState()}
+async function applyTorch(v){
+  try{await cStream.getVideoTracks()[0].applyConstraints({advanced:[{torch:v}]});tOn=v}catch(e){tOn=false}
+  ignoreUntil=Date.now()+2000;prev=null;pushState();   /* light change must not count as motion */
+}
+function torch(v){manualTorch=v;clearTimeout(flashTO);return applyTorch(v)}
+/* night mode: flash only when motion is seen, for 20 s after the last motion */
+function autoFlash(){
+  if(!night||manualTorch||facing!=='environment'||!torchOk())return;
+  clearTimeout(flashTO);if(!tOn)applyTorch(true);
+  flashTO=setTimeout(()=>{if(!manualTorch)applyTorch(false)},20000);
+}
 $('#torchBtn').onclick=()=>torch(!tOn);
+async function openCam(want,cur){
+  const q=saver?VID_LO:VID_HI,g=c=>navigator.mediaDevices.getUserMedia({video:c});
+  try{return await g({facingMode:{exact:want},...q})}catch(e){}
+  try{const devs=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==='videoinput');
+    const re=want==='user'?/front|user|selfie/i:/back|rear|environment/i;
+    const d=devs.find(x=>x.deviceId!==cur&&re.test(x.label))||devs.find(x=>x.deviceId!==cur);
+    if(d)return await g({deviceId:{exact:d.deviceId},...q})}catch(e){}
+  return null;
+}
 async function flip(){
-  facing=facing==='environment'?'user':'environment';
-  let n;try{n=await getStream()}catch(e){return}
+  if(!cStream)return;
+  const want=facing==='environment'?'user':'environment',old=cStream.getVideoTracks()[0],curId=old.getSettings().deviceId;
+  clearTimeout(flashTO);if(tOn)await applyTorch(false);manualTorch=false;
+  old.stop();                       /* many phones cannot open a second camera while the first is running */
+  let n=await openCam(want,curId),switched=!!n;
+  if(!n){n=await openCam(facing,null)}   /* could not switch: get the old camera back */
+  if(!n){status('Camera error. Reload the page.');return}
+  if(switched)facing=want;else status('This phone would not switch cameras');
   const vt=n.getVideoTracks()[0],pc=curCall&&curCall.peerConnection,s=pc&&pc.getSenders().find(x=>x.track&&x.track.kind==='video');
   s&&await s.replaceTrack(vt);
-  const old=cStream.getVideoTracks()[0];cStream.removeTrack(old);old.stop();cStream.addTrack(vt);
-  n.getAudioTracks().forEach(t=>t.stop());prev=null;$('#camV').srcObject=cStream;
+  cStream=new MediaStream([vt,...cStream.getAudioTracks()]);
+  $('#camV').srcObject=cStream;prev=null;ignoreUntil=Date.now()+2000;
   tOn=false;if(night)setNight(true);else pushState();
 }
 $('#flipBtn').onclick=flip;
@@ -251,6 +280,7 @@ function shot(){const v=$('#camV'),c=document.createElement('canvas');c.width=24
 /* night vision (yellow tone), mic, speaker, siren, power saver */
 async function setNight(v){
   night=v;$('#camV').style.filter=v?NIGHT:'';
+  if(!v&&tOn&&!manualTorch){clearTimeout(flashTO);applyTorch(false)}
   try{const t=cStream.getVideoTracks()[0],c=t.getCapabilities();
     if(c.exposureCompensation)await t.applyConstraints({advanced:[{exposureCompensation:v?c.exposureCompensation.max:0}]})}catch(e){}
   pushState();
@@ -288,7 +318,7 @@ function motionLoop(){
     mx.filter=night?'brightness(2.5) contrast(1.3)':'none';mx.drawImage(v,0,0,64,48);
     const d=mx.getImageData(0,0,64,48).data,g=new Uint8Array(64*48);
     for(let i=0;i<g.length;i++)g[i]=(d[i*4]*.3+d[i*4+1]*.59+d[i*4+2]*.11)|0;
-    if(prev&&armed){let ch=0,tot=0;
+    if(prev&&armed&&Date.now()>ignoreUntil){let ch=0,tot=0;
       for(let y=0;y<48;y++)for(let x=0;x<64;x++){if(!zoneOn[Math.floor(y/16)*3+Math.floor(x/21.4)])continue;tot++;if(Math.abs(g[y*64+x]-prev[y*64+x])>28)ch++}
       if(tot&&ch/tot>(11-sens)*.006)onMotion();
     }
@@ -296,6 +326,7 @@ function motionLoop(){
   },250);
 }
 function onMotion(){
+  autoFlash();
   const now=Date.now();$('#camB').classList.add('m');setTimeout(()=>$('#camB').classList.remove('m'),1500);
   if(now-lastAlert<15000)return;lastAlert=now;
   if(autoSiren)startSiren();
@@ -307,7 +338,7 @@ function onMotion(){
 }
 
 /* ================= VIEWER ================= */
-let vPeer,vConn,vCall,micTrack,vRec,live=false,vTimer,S={armed:true},rot=+(localStorage.getItem('he-rot')||0),fit=false,talking=false,vWake;
+let vPeer,vConn,vCall,micTrack,vRec,live=false,vTimer,S={armed:true},rot=+(localStorage.getItem('he-rot')||0),fit=true,talking=false,vWake;
 $('#goView').onclick=()=>{show('view');$('#vu').value=localStorage.getItem('he-user')||'';try{Notification.permission==='default'&&Notification.requestPermission()}catch(e){}};
 $('#viewBack').onclick=()=>show('home');
 $('#vExit').onclick=()=>location.reload();
@@ -361,13 +392,14 @@ function renderEvents(){const el=$('#events');if(!events.length)return;el.innerH
 function addEvent(e){events.unshift(e);events=events.slice(0,15);try{localStorage.setItem('he-ev',JSON.stringify(events))}catch(x){events=events.slice(0,5)}renderEvents()}
 function beep(){try{const a=new AudioContext(),o=a.createOscillator();o.frequency.value=880;o.connect(a.destination);o.start();setTimeout(()=>{o.stop();a.close()},400)}catch(e){}}
 function onCamMsg(m){
-  if(m.t==='motion'){addEvent(m);beep();$('#vB').textContent='Motion!';$('#vB').classList.add('m');setTimeout(()=>{$('#vB').textContent='Live';$('#vB').classList.remove('m')},3000);
+  if(m.t==='motion'){addEvent(m);beep();$('#vB').textContent='Motion!';$('#vB').classList.add('m');setTimeout(()=>{$('#vB').textContent='Live';$('#vB').classList.remove('m');setLive()},3000);
     try{Notification.permission==='granted'&&new Notification('HomeEye: motion detected',{icon:m.img})}catch(x){}}
   if(m.t==='snap')addEvent({...m,snap:1});
   if(m.t==='state')applyState(m);
 }
 function applyState(m){
   S=m;
+  bt('vFlip',false,m.facing==='user'?'Use back':'Use front');
   bt('vArm',m.armed,m.armed?'Armed':'Paused');
   bt('vTorch',m.torch,m.torchOk?'Light':'Light n/a');
   bt('vNight',m.night,'Night');
@@ -395,12 +427,15 @@ $('#vol').oninput=e=>{$('#remV').volume=+e.target.value};
 $('#talk').onclick=()=>{if(!micTrack){bt('talk',false,'No mic');return}talking=!talking;micTrack.enabled=talking;bt('talk',talking,talking?'Talking':'Talk')};
 
 /* rotation + fill/fit: video box is sized to the screen (swapped when rotated 90/270) */
+function setLive(){const v=$('#remV');if($('#vB').classList.contains('m'))return;$('#vB').textContent='Live'+(v.videoWidth?' '+v.videoWidth+'×'+v.videoHeight:'')}
+$('#remV').addEventListener('resize',setLive);$('#remV').addEventListener('loadedmetadata',setLive);
 function layoutVideo(){
   const v=$('#remV'),L=$('#live'),W=L.clientWidth,H=L.clientHeight,vert=rot%180;
   v.style.width=(vert?H:W)+'px';v.style.height=(vert?W:H)+'px';
   v.style.transform='translate(-50%,-50%) rotate('+rot+'deg)';v.style.objectFit=fit?'contain':'cover';
 }
 $('#vRotate').onclick=()=>{rot=(rot+90)%360;localStorage.setItem('he-rot',rot);layoutVideo()};
+bt('vFit',true,'Fit');
 $('#vFit').onclick=()=>{fit=!fit;bt('vFit',fit,fit?'Fit':'Fill');layoutVideo()};
 ['resize','orientationchange'].forEach(k=>window.addEventListener(k,()=>setTimeout(layoutVideo,150)));
 
